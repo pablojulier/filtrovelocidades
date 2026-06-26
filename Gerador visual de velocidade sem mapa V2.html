@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Sistema de Velocidade + Auditoria Telemetria (V10.1)</title>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<style>
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #f4f6f9;
+  padding: 20px;
+}
+.container {
+  max-width: 1200px;
+  margin: auto;
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+  position: relative;
+}
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 5px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+}
+button:hover {
+  background: #1d4ed8;
+}
+.upload-section {
+  display: flex;
+  gap: 15px;
+  margin: 15px 0;
+}
+.drop-zone {
+  flex: 1;
+  border: 2px dashed #2563eb;
+  padding: 20px;
+  text-align: center;
+  border-radius: 8px;
+  background: #f9fafb;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+.drop-zone.loaded {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+.info-container {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+.card {
+  flex: 1;
+  padding: 15px;
+  border-radius: 8px;
+  text-align: center;
+  background: #f1f5f9;
+}
+.media { background: #dcfce7; border: 2px solid #22c55e; }
+
+.status-log {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-top: 10px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.container-tabela {
+  margin-top: 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  width: fit-content;
+  min-width: 400px;
+}
+.cabecalho-tabela-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1e293b;
+  color: white;
+  padding: 10px 15px;
+}
+.cabecalho-tabela-flex h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.wrapper-tabela {
+  max-height: 350px;
+  overflow-y: auto;
+}
+.tabela-excessos {
+  width: auto;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+.tabela-excessos th {
+  background: #bfdbfe;
+  color: #000000;
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+  border: 1px solid #cbd5e1;
+  font-weight: bold;
+}
+.tabela-excessos td {
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+.tabela-excessos tr:nth-child(even) {
+  background: #f8fafc;
+}
+.btn-toggle-tabela {
+  background: #475569;
+}
+.btn-toggle-tabela.ativo {
+  background: #16a34a;
+}
+.btn-copiar-tabela {
+  background: #10b981;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.btn-copiar-imagem {
+  background: #6366f1;
+  font-size: 12px;
+  padding: 6px 12px;
+  margin-left: 5px;
+}
+
+.notificacao-copiado {
+  position: fixed;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #ffffff;
+  padding: 12px 24px;
+  border-radius: 30px;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+  pointer-events: none;
+}
+.notificacao-copiado.visivel {
+  opacity: 1;
+}
+</style>
+</head>
+
+<body>
+
+<div id="toastCopiado" class="notificacao-copiado">✔️ Conteúdo copiado com sucesso!</div>
+
+<div class="container" id="elementoPainelCompleto">
+
+  <div class="top-bar">
+    <h2>📊 Filtro automatico de excessos de velocidades</h2>
+    <div style="display: flex; gap: 6px; align-items: center;">
+      Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
+      <button onclick="atualizarLimite()">Atualizar</button>
+      <button id="btnToggleTabela" class="btn-toggle-tabela ativo" onclick="alternarVisibilidadeTabela()">Ocultar Tabela</button>
+      <label style="margin-left:5px; font-size:12px;">
+        <input type="checkbox" id="autoDownload"> Baixar planilha
+      </label>
+    </div>
+  </div>
+
+  <div class="upload-section">
+    <div id="dropTelemetria" class="drop-zone">
+      <b>1. Telemetria do Veículo</b><br>
+      <span id="txtTelemetria">Arraste a planilha de velocidade aqui</span>
+    </div>
+  </div>
+
+  <input type="file" id="fileTelemetria" style="display: none;" accept=".xlsx, .xls, .ods, .csv">
+
+  <div class="info-container">
+    <div class="card media">Velocidade Média<br><strong id="media">--</strong></div>
+    <div class="card">Maior Velocidade<br><strong id="pico">--</strong></div>
+    <div class="card">Total de Picos<br><strong id="picos">--</strong></div>
+    <div class="card">Pontuação Gerada<br><strong id="pontuacao">--</strong></div>
+  </div>
+
+  <div id="statusLog" class="status-log">Aguardando importação do arquivo...</div>
+
+  <div id="containerTabelaExcessos" class="container-tabela" style="display: block;">
+    <div class="cabecalho-tabela-flex">
+      <h3>📋 Registros de Excesso de Velocidade</h3>
+      <div>
+        <button id="btnCopiarTabelaEmail" class="btn-copiar-tabela" onclick="copiarTabelaParaEmail()">📋 E-mail / Excel</button>
+        <button class="btn-copiar-tabela btn-copiar-imagem" onclick="copiarTabelaComoImagem()">📸 Imagem</button>
+      </div>
+    </div>
+    <div class="wrapper-tabela">
+      <table class="tabela-excessos" id="tabelaDadosExcessos">
+        <thead>
+          <tr>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Data / Hora</th>
+            <th>Referência</th>
+            <th>Velocidade</th>
+          </tr>
+        </thead>
+        <tbody id="corpoTabelaExcessos">
+          <tr>
+            <td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado ou limite não violado.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let velocidades = [];
+let labels = [];
+let coordenadas = []; 
+let referenciasPlanilha = []; 
+let limite = 88;
+
+let dadosOriginais = [];
+let colunaVelocidadeGlobal = "";
+let autoDownload = localStorage.getItem("autoDownload") !== "false";
+let exibirTabelaPainel = false;
+
+document.getElementById('autoDownload').checked = autoDownload;
+document.getElementById('autoDownload').addEventListener('change', function() {
+  autoDownload = this.checked;
+  localStorage.setItem("autoDownload", autoDownload);
+});
+
+function log(mensagem) {
+  document.getElementById('statusLog').innerHTML = `ℹ️ ${mensagem}`;
+}
+
+function exibirMensagemCopiadoCurta(textoCustomizado) {
+  const toast = document.getElementById('toastCopiado');
+  toast.innerText = textoCustomizado || "✔️ Copiado para a área de transferência!";
+  toast.classList.add('visivel');
+  
+  setTimeout(() => {
+    toast.classList.remove('visivel');
+  }, 1000);
+}
+
+function copiarTabelaComoImagem() {
+    const container = document.getElementById('containerTabelaExcessos');
+    const tabela = document.getElementById('tabelaDadosExcessos');
+    
+    if (!dadosOriginais.length) return alert("Nenhum dado para converter em imagem.");
+
+    const estavaEscondido = container.style.display === 'none';
+    if (estavaEscondido) {
+        container.style.display = 'block';
+        container.style.position = 'absolute';
+        container.style.left = '-9999px';
+    }
+
+    html2canvas(tabela, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false
+    }).then(canvas => {
+        canvas.toBlob(blob => {
+            if (!blob) return;
+            navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
+                exibirMensagemCopiadoCurta("📸 Tabela copiada como imagem!");
+            });
+        });
+        
+        if (estavaEscondido) {
+            container.style.display = 'none';
+            container.style.position = 'static';
+        }
+    }).catch(err => {
+        console.error("Erro ao gerar imagem:", err);
+        if (estavaEscondido) {
+            container.style.display = 'none';
+            container.style.position = 'static';
+        }
+    });
+}
+
+const dropTelemetria = document.getElementById('dropTelemetria');
+const fileTelemetria = document.getElementById('fileTelemetria');
+
+dropTelemetria.onclick = () => fileTelemetria.click();
+fileTelemetria.onchange = (e) => { if(e.target.files.length) processarTelemetria(e.target.files[0]); };
+
+setupDropZone(dropTelemetria, processarTelemetria);
+
+function setupDropZone(zone, callback) {
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.background = '#eff6ff'; });
+  zone.addEventListener('dragleave', () => zone.style.background = '#f9fafb');
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) callback(e.dataTransfer.files[0]);
+  });
+}
+
+function processarTelemetria(file) {
+  log("Processando planilha de telemetria...");
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet);
+
+      if(!json.length) {
+        log("Erro: A planilha está vazia.");
+        return;
+      }
+      dadosOriginais = json;
+
+      const chaves = Object.keys(json[0]);
+      
+      const normalizar = (texto) => {
+        if (!texto) return "";
+        return String(texto).toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "");
+      };
+
+      const colVel = chaves.find(c => {
+        const n = normalizar(c);
+        return n.includes('velocidade') || n === 'vel';
+      });
+      colunaVelocidadeGlobal = colVel;
+
+      const colData = chaves.find(c => {
+        const n = normalizar(c);
+        return n.includes('datahora') || n.includes('data') || n.includes('hora');
+      });
+
+      const colLat = chaves.find(c => { 
+        const n = normalizar(c); 
+        return n === 'lat' || n === 'latitude' || n.startsWith('lat'); 
+      });
+
+      const colLng = chaves.find(c => { 
+        const n = normalizar(c); 
+        return n === 'lng' || n === 'lon' || n === 'longitude' || n.startsWith('long'); 
+      });
+      
+      const colRef = chaves.find(c => {
+        const n = normalizar(c);
+        return n.includes('referencia') || n.includes('localizacao') || n.includes('cidade') || n.includes('posicao') || n.includes('endereco');
+      });
+
+      if (!colVel) {
+        alert("Erro: Não foi possível identificar a coluna de velocidade (Velocidade, Vel, etc).");
+        return;
+      }
+
+      velocidades = json.map(r => parseFloat(r[colVel] || 0));
+      labels = json.map((r,i) => colData && r[colData] ? r[colData] : i+1);
+      referenciasPlanilha = json.map(r => colRef && r[colRef] ? String(r[colRef]).trim() : 'Não informada');
+
+      if (colLat && colLng) {
+        coordenadas = json.map(r => {
+          if(r[colLat] === undefined || r[colLng] === undefined) return null;
+          let lat = parseFloat(String(r[colLat]).replace(',', '.'));
+          let lng = parseFloat(String(r[colLng]).replace(',', '.'));
+          return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] : null;
+        });
+      } else {
+        coordenadas = [];
+      }
+
+      calcularMetricas();
+      dropTelemetria.classList.add('loaded');
+      document.getElementById('txtTelemetria').innerHTML = `✔️ <b>Telemetria Ativa</b><br>${file.name}`;
+      
+      log("Telemetria processada com sucesso.");
+      
+    } catch (err) {
+      alert("Erro ao processar os dados internos da planilha. Verifique se as colunas estão formatadas corretamente.");
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function calcularMetricas(){
+  if(!velocidades.length) return;
+  const mov = velocidades.filter(v=>v>0);
+  const media = mov.length ? (mov.reduce((a,b)=>a+b,0)/mov.length).toFixed(1) : 0;
+  const pico = Math.max(...velocidades);
+  
+  const totalAcimaDoLimite = velocidades.filter(v => v > limite).length;
+  const pontuacao = calcularPontuacao(velocidades, limite);
+
+  document.getElementById('media').innerText = media + " km/h";
+  document.getElementById('pico').innerText = pico + " km/h";
+  document.getElementById('picos').innerText = totalAcimaDoLimite;
+  document.getElementById('pontuacao').innerText = pontuacao;
+
+  atualizarTabelaPainelDados();
+  if(autoDownload) exportarFiltrado();
+}
+
+function calcularPontuacao(velocidades, limite){
+  let pontos = 0;
+  velocidades.forEach(v => {
+    if (v <= limite) return;
+    if (limite == 88) {
+      if (v >= 89 && v <= 93) pontos += 1;
+      else if (v >= 94 && v <= 96) pontos += 2;
+      else if (v >= 97 && v <= 99) pontos += 3;
+      else if (v >= 100) pontos += 10;
+    }
+    if (limite == 80) {
+      if (v >= 81 && v <= 88) pontos += 1;
+      else if (v >= 89 && v <= 94) pontos += 2;
+      else if (v >= 95 && v <= 99) pontos += 3;
+      else if (v >= 100) pontos += 10;
+    }
+  });
+  return pontos;
+}
+
+function atualizarLimite(){
+  limite = parseFloat(document.getElementById('limite').value);
+  calcularMetricas();
+}
+
+function exportarFiltrado(){
+  if (!dadosOriginais.length) return;
+  const filtrados = dadosOriginais.filter(row => parseFloat(row[colunaVelocidadeGlobal] || 0) > limite);
+  if (!filtrados.length) return;
+  const headers = Object.keys(dadosOriginais[0]);
+  const ws_data = [headers, ...filtrados.map(obj => headers.map(h => obj[h]))];
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Excesso");
+  const nome = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  XLSX.writeFile(wb, `excesso_completo_${nome}.xlsx`);
+}
+
+function alternarVisibilidadeTabela() {
+  const container = document.getElementById('containerTabelaExcessos'); 
+  const btn = document.getElementById('btnToggleTabela');
+  exibirTabelaPainel = !exibirTabelaPainel;
+  if (exibirTabelaPainel) { 
+    container.style.display = 'block'; 
+    btn.classList.add('ativo'); 
+    btn.innerText = 'Ocultar Tabela'; 
+    atualizarTabelaPainelDados(); 
+  } else { 
+    container.style.display = 'none'; 
+    btn.classList.remove('ativo'); 
+    btn.innerText = 'Exibir Tabela'; 
+  }
+}
+
+function atualizarTabelaPainelDados() {
+  const corpo = document.getElementById('corpoTabelaExcessos');
+  if(!corpo) return;
+  if (!dadosOriginais.length) {
+    corpo.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado na aplicação.</td></tr>`;
+    return;
+  }
+  let linesHTML = "";
+  let totalAdicionados = 0;
+  velocidades.forEach((vel, index) => {
+    if (vel > limite) {
+      totalAdicionados++;
+      const latVal = coordenadas[index] ? coordenadas[index][0].toFixed(6) : 'N/A';
+      const lngVal = coordenadas[index] ? coordenadas[index][1].toFixed(6) : 'N/A';
+      linesHTML += `
+        <tr>
+          <td>${latVal}</td>
+          <td>${lngVal}</td>
+          <td>${labels[index] || 'N/A'}</td>
+          <td style="color:#334155; font-weight:500;">${referenciasPlanilha[index]}</td>
+          <td style="font-weight:bold; color: ${vel >= 100 ? '#dc2626' : '#b45309'}">${vel} km/h</td>
+        </tr>`;
+    }
+  });
+  if (totalAdicionados === 0) {
+    corpo.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum registro acima do limite.</td></tr>`;
+  } else {
+    corpo.innerHTML = linesHTML;
+  }
+}
+
+function copiarTabelaParaEmail() {
+  const registrosParaCopiar = [];
+  velocidades.forEach((vel, index) => {
+    if (vel > limite) {
+      registrosParaCopiar.push({
+        lat: coordenadas[index] ? coordenadas[index][0].toFixed(6) : 'N/A',
+        lng: coordenadas[index] ? coordenadas[index][1].toFixed(6) : 'N/A',
+        data: labels[index] || 'N/A',
+        ref: referenciasPlanilha[index],
+        vel: vel
+      });
+    }
+  });
+
+  if (registrosParaCopiar.length === 0) return alert("Sem dados para copiar.");
+
+  let htmlEmail = `
+    <table border="1" style="border-collapse: collapse; font-family: Calibri, sans-serif; font-size: 11pt;">
+      <thead>
+        <tr style="background-color: #bfdbfe;">
+          <th style="padding: 5px;">Latitude</th>
+          <th style="padding: 5px;">Longitude</th>
+          <th style="padding: 5px;">Data / Hora</th>
+          <th style="padding: 5px;">Referência</th>
+          <th style="padding: 5px;">Velocidade</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  registrosParaCopiar.forEach(r => {
+    htmlEmail += `
+        <tr>
+          <td>${r.lat}</td>
+          <td>${r.lng}</td>
+          <td>${r.data}</td>
+          <td>${r.ref}</td>
+          <td style="font-weight: bold; color: ${r.vel >= 100 ? '#dc2626' : '#b45309'};">${r.vel} km/h</td>
+        </tr>`;
+  });
+  htmlEmail += `</tbody></table>`;
+
+  let textoPlano = "Latitude\tLongitude\tData / Hora\tReferência\tVelocidade\n";
+  registrosParaCopiar.forEach(r => {
+    textoPlano += `${r.lat}\t${r.lng}\t${r.data}\t${r.ref}\t${r.vel} km/h\n`;
+  });
+
+  const blobHTML = new Blob([htmlEmail], { type: 'text/html' });
+  const blobText = new Blob([textoPlano], { type: 'text/plain' });
+
+  navigator.clipboard.write([
+    new ClipboardItem({ 
+      'text/html': blobHTML,
+      'text/plain': blobText 
+    })
+  ]).then(() => {
+    exibirMensagemCopiadoCurta("📋 Tabela formatada para Excel/E-mail!");
+  }).catch(err => {
+    console.error("Erro na cópia:", err);
+    alert("Erro ao copiar. Verifique as permissões do navegador.");
+  });
+}
+</script>
+
+</body>
+</html>
