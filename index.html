@@ -7,6 +7,10 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
+<!-- Leaflet CSS & JS (Mapa interativo gratuito) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <style>
 body {
   font-family: 'Segoe UI', sans-serif;
@@ -14,7 +18,7 @@ body {
   padding: 20px;
 }
 .container {
-  max-width: 1200px;
+  max-width: 1350px;
   margin: auto;
   background: white;
   padding: 20px;
@@ -83,14 +87,21 @@ button:hover {
   overflow-y: auto;
 }
 
-.container-tabela {
+/* Novo Layout Lado a Lado para Tabela e Mapa */
+.conteudo-inferior {
+  display: flex;
+  gap: 15px;
   margin-top: 20px;
+  align-items: stretch;
+}
+
+.container-tabela {
+  flex: 1;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   overflow: hidden;
   background: white;
-  width: fit-content;
-  min-width: 400px;
+  min-width: 0;
 }
 .cabecalho-tabela-flex {
   display: flex;
@@ -105,14 +116,15 @@ button:hover {
   font-size: 16px;
 }
 .wrapper-tabela {
-  max-height: 350px;
+  max-height: 400px;
   overflow-y: auto;
 }
 .tabela-excessos {
-  width: auto;
+  width: 100%;
   border-collapse: collapse;
   text-align: left;
   font-size: 12px;
+  table-layout: fixed;
 }
 .tabela-excessos th {
   background: #bfdbfe;
@@ -131,23 +143,35 @@ button:hover {
 .tabela-excessos tr:nth-child(even) {
   background: #f8fafc;
 }
-.btn-toggle-tabela {
-  background: #475569;
+
+/* Ajuste de Largura das Colunas */
+.tabela-excessos th:nth-child(1), .tabela-excessos td:nth-child(1) { width: 85px; }
+.tabela-excessos th:nth-child(2), .tabela-excessos td:nth-child(2) { width: 85px; }
+.tabela-excessos th:nth-child(3), .tabela-excessos td:nth-child(3) { width: 110px; }
+.tabela-excessos th:nth-child(4), .tabela-excessos td:nth-child(4) { width: auto; white-space: normal; word-break: break-word; }
+.tabela-excessos th:nth-child(5), .tabela-excessos td:nth-child(5) { width: 75px; text-align: center; }
+
+/* Container do Mapa */
+.container-mapa {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.btn-toggle-tabela.ativo {
-  background: #16a34a;
+#mapaRota {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
 }
-.btn-copiar-tabela {
-  background: #10b981;
-  font-size: 12px;
-  padding: 6px 12px;
-}
-.btn-copiar-imagem {
-  background: #6366f1;
-  font-size: 12px;
-  padding: 6px 12px;
-  margin-left: 5px;
-}
+
+.btn-toggle-tabela { background: #475569; }
+.btn-toggle-tabela.ativo { background: #16a34a; }
+.btn-copiar-tabela { background: #10b981; font-size: 12px; padding: 6px 12px; }
+.btn-copiar-imagem { background: #6366f1; font-size: 12px; padding: 6px 12px; margin-left: 5px; }
 
 .notificacao-copiado {
   position: fixed;
@@ -169,9 +193,7 @@ button:hover {
   transition: opacity 0.2s ease-in-out;
   pointer-events: none;
 }
-.notificacao-copiado.visivel {
-  opacity: 1;
-}
+.notificacao-copiado.visivel { opacity: 1; }
 </style>
 </head>
 
@@ -182,7 +204,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automatico de excessos de velocidades</h2>
+    <h2>📊 Filtro automático de excessos de velocidades</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -211,31 +233,41 @@ button:hover {
 
   <div id="statusLog" class="status-log">Aguardando importação do arquivo...</div>
 
-  <div id="containerTabelaExcessos" class="container-tabela" style="display: block;">
-    <div class="cabecalho-tabela-flex">
-      <h3>📋 Registros de Excesso de Velocidade</h3>
-      <div>
-        <button id="btnCopiarTabelaEmail" class="btn-copiar-tabela" onclick="copiarTabelaParaEmail()">📋 E-mail / Excel</button>
-        <button class="btn-copiar-tabela btn-copiar-imagem" onclick="copiarTabelaComoImagem()">📸 Imagem</button>
+  <div class="conteudo-inferior">
+    <div id="containerTabelaExcessos" class="container-tabela" style="display: block;">
+      <div class="cabecalho-tabela-flex">
+        <h3>📋 Registros de Excesso</h3>
+        <div>
+          <button id="btnCopiarTabelaEmail" class="btn-copiar-tabela" onclick="copiarTabelaParaEmail()">📋 E-mail / Excel</button>
+          <button class="btn-copiar-tabela btn-copiar-imagem" onclick="copiarTabelaComoImagem()">📸 Imagem</button>
+        </div>
+      </div>
+      <div class="wrapper-tabela">
+        <table class="tabela-excessos" id="tabelaDadosExcessos">
+          <thead>
+            <tr>
+              <th>Latitude</th>
+              <th>Longitude</th>
+              <th>Data / Hora</th>
+              <th>Referência</th>
+              <th>Velocidade</th>
+            </tr>
+          </thead>
+          <tbody id="corpoTabelaExcessos">
+            <tr>
+              <td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado ou limite não violado.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
-    <div class="wrapper-tabela">
-      <table class="tabela-excessos" id="tabelaDadosExcessos">
-        <thead>
-          <tr>
-            <th>Latitude</th>
-            <th>Longitude</th>
-            <th>Data / Hora</th>
-            <th>Referência</th>
-            <th>Velocidade</th>
-          </tr>
-        </thead>
-        <tbody id="corpoTabelaExcessos">
-          <tr>
-            <td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado ou limite não violado.</td>
-          </tr>
-        </tbody>
-      </table>
+
+    <!-- Espaço do Mapa -->
+    <div class="container-mapa">
+      <div class="cabecalho-tabela-flex">
+        <h3>🗺️Mapa da Rota</h3>
+      </div>
+      <div id="mapaRota"></div>
     </div>
   </div>
 
@@ -251,13 +283,32 @@ let limite = 88;
 let dadosOriginais = [];
 let colunaVelocidadeGlobal = "";
 let autoDownload = localStorage.getItem("autoDownload") !== "false";
-let exibirTabelaPainel = false;
+let exibirTabelaPainel = true;
+
+// Variáveis do Mapa
+let map = null;
+let polylineRota = null;
+let marcadoresExcessos = [];
 
 document.getElementById('autoDownload').checked = autoDownload;
 document.getElementById('autoDownload').addEventListener('change', function() {
   autoDownload = this.checked;
   localStorage.setItem("autoDownload", autoDownload);
 });
+
+// Inicialização do Mapa OpenStreetMap
+function inicializarMapa() {
+  if (map) return;
+  map = L.map('mapaRota').setView([-14.2350, -51.9253], 4); // Visão geral do Brasil
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+}
+
+window.onload = () => {
+  inicializarMapa();
+};
 
 function log(mensagem) {
   document.getElementById('statusLog').innerHTML = `ℹ️ ${mensagem}`;
@@ -401,6 +452,7 @@ function processarTelemetria(file) {
       }
 
       calcularMetricas();
+      desenharRotaNoMapa();
       dropTelemetria.classList.add('loaded');
       document.getElementById('txtTelemetria').innerHTML = `✔️ <b>Telemetria Ativa</b><br>${file.name}`;
       
@@ -412,6 +464,46 @@ function processarTelemetria(file) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+function desenharRotaNoMapa() {
+  if (!map) inicializarMapa();
+
+  // Limpar rota e marcadores antigos
+  if (polylineRota) map.removeLayer(polylineRota);
+  marcadoresExcessos.forEach(m => map.removeLayer(m));
+  marcadoresExcessos = [];
+
+  const rotaValida = coordenadas.filter(c => c !== null);
+  if (!rotaValida.length) return;
+
+  // Desenhar linha de rota azul
+  polylineRota = L.polyline(rotaValida, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(map);
+
+  // Inserir pontos de excesso no mapa (Pinos Vermelhos)
+  velocidades.forEach((vel, idx) => {
+    if (vel > limite && coordenadas[idx]) {
+      const marker = L.circleMarker(coordenadas[idx], {
+        radius: 6,
+        fillColor: vel >= 100 ? '#dc2626' : '#f59e0b',
+        color: '#ffffff',
+        weight: 1.5,
+        fillOpacity: 0.9
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <b>⚠️ Excesso de Velocidade</b><br>
+        <b>Velocidade:</b> ${vel} km/h<br>
+        <b>Data/Hora:</b> ${labels[idx] || 'N/A'}<br>
+        <b>Local:</b> ${referenciasPlanilha[idx]}
+      `);
+
+      marcadoresExcessos.push(marker);
+    }
+  });
+
+  // Ajustar zoom do mapa para abranger toda a rota
+  map.fitBounds(polylineRota.getBounds(), { padding: [20, 20] });
 }
 
 function calcularMetricas(){
@@ -455,6 +547,7 @@ function calcularPontuacao(velocidades, limite){
 function atualizarLimite(){
   limite = parseFloat(document.getElementById('limite').value);
   calcularMetricas();
+  desenharRotaNoMapa();
 }
 
 function exportarFiltrado(){
@@ -484,6 +577,7 @@ function alternarVisibilidadeTabela() {
     btn.classList.remove('ativo'); 
     btn.innerText = 'Exibir Tabela'; 
   }
+  if (map) setTimeout(() => map.invalidateSize(), 200);
 }
 
 function atualizarTabelaPainelDados() {
