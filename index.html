@@ -480,7 +480,7 @@ function desenharRotaNoMapa() {
   // Desenhar linha de rota azul
   polylineRota = L.polyline(rotaValida, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(map);
 
-  // Inserir pontos de excesso no mapa (Pinos Vermelhos)
+  // Inserir pontos de excesso no mapa 
   velocidades.forEach((vel, idx) => {
     if (vel > limite && coordenadas[idx]) {
       const marker = L.circleMarker(coordenadas[idx], {
