@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Auditoria de Velocidade (V10.6)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V10.7)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -218,7 +218,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V10.6</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V10.7</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -411,16 +411,16 @@ function processarTelemetria(file) {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet);
 
-      if(!json.length) {
+      // Lê a planilha inteira como matriz bruta (sem assumir que a linha 1 é o cabeçalho),
+      // pois alguns relatórios (ex: "Relatório de Posições") trazem título/linhas em branco antes do cabeçalho real.
+      const linhasBrutas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      if (!linhasBrutas.length) {
         log("Erro: A planilha está vazia.");
         return;
       }
-      dadosOriginais = json;
 
-      const chaves = Object.keys(json[0]);
-      
       const normalizar = (texto) => {
         if (!texto) return "";
         return String(texto).toLowerCase()
@@ -429,6 +429,49 @@ function processarTelemetria(file) {
           .replace(/[^a-z0-9]/g, "");
       };
 
+      // Palavras-chave usadas para localizar automaticamente a linha de cabeçalho,
+      // mesmo quando há título/linhas vazias antes dela (ex: relatórios exportados de sistemas de rastreamento).
+      const palavrasChaveCabecalho = ['velocidade', 'vel', 'latitude', 'lat', 'longitude', 'lng', 'lon', 'long', 'data', 'hora', 'cidade', 'referencia', 'localizacao', 'endereco', 'posicao', 'veiculo', 'codigo', 'placa', 'uf'];
+
+      let headerRowIndex = -1;
+      let melhorPontuacao = 0;
+      for (let i = 0; i < Math.min(linhasBrutas.length, 30); i++) {
+        const linha = linhasBrutas[i];
+        if (!linha || !linha.length) continue;
+        const pontuacao = linha.reduce((acc, cel) => {
+          const n = normalizar(cel);
+          const reconhecida = n && palavrasChaveCabecalho.some(p => n === p || n.includes(p));
+          return reconhecida ? acc + 1 : acc;
+        }, 0);
+        // Considera cabeçalho válido a linha que reconhece pelo menos 2 colunas-chave (ex: velocidade + latitude)
+        if (pontuacao >= 2 && pontuacao > melhorPontuacao) {
+          melhorPontuacao = pontuacao;
+          headerRowIndex = i;
+        }
+      }
+      if (headerRowIndex === -1) headerRowIndex = 0; // fallback: assume que a primeira linha é o cabeçalho
+
+      const cabecalho = linhasBrutas[headerRowIndex].map(c => String(c || '').trim());
+      const linhasDados = linhasBrutas.slice(headerRowIndex + 1);
+
+      const json = linhasDados
+        .filter(linha => linha.some(cel => cel !== '' && cel !== undefined && cel !== null))
+        .map(linha => {
+          const obj = {};
+          cabecalho.forEach((nomeCol, idx) => {
+            if (nomeCol) obj[nomeCol] = linha[idx];
+          });
+          return obj;
+        });
+
+      if(!json.length) {
+        log("Erro: A planilha está vazia.");
+        return;
+      }
+      dadosOriginais = json;
+
+      const chaves = cabecalho.filter(Boolean);
+      
       const colVel = chaves.find(c => {
         const n = normalizar(c);
         return n.includes('velocidade') || n === 'vel';
@@ -436,23 +479,36 @@ function processarTelemetria(file) {
       colunaVelocidadeGlobal = colVel;
 
       const colData = chaves.find(c => {
+        if (c === colVel) return false;
         const n = normalizar(c);
         return n.includes('datahora') || n.includes('data') || n.includes('hora');
       });
 
       const colLat = chaves.find(c => { 
+        if (c === colVel || c === colData) return false;
         const n = normalizar(c); 
         return n === 'lat' || n === 'latitude' || n.startsWith('lat'); 
       });
 
       const colLng = chaves.find(c => { 
+        if (c === colVel || c === colData || c === colLat) return false;
         const n = normalizar(c); 
         return n === 'lng' || n === 'lon' || n === 'longitude' || n.startsWith('long'); 
       });
       
       const colRef = chaves.find(c => {
+        // Exclui colunas já usadas por outros campos (ex: "Velocidade" contém "cidade" como substring
+        // e seria capturado incorretamente pela busca por "cidade" abaixo)
+        if (c === colVel || c === colData || c === colLat || c === colLng) return false;
         const n = normalizar(c);
         return n.includes('referencia') || n.includes('localizacao') || n.includes('cidade') || n.includes('posicao') || n.includes('endereco');
+      });
+
+      // Coluna de UF/Estado (opcional) para compor "Cidade - UF" quando vier separada da coluna de cidade
+      const colUf = chaves.find(c => {
+        if (c === colVel || c === colData || c === colLat || c === colLng || c === colRef) return false;
+        const n = normalizar(c);
+        return n === 'uf' || n === 'estado';
       });
 
       if (!colVel) {
@@ -460,13 +516,18 @@ function processarTelemetria(file) {
         return;
       }
 
-      velocidades = json.map(r => parseFloat(r[colVel] || 0));
+      velocidades = json.map(r => parseFloat(String(r[colVel]).replace(',', '.') || 0));
       labels = json.map((r,i) => colData && r[colData] ? r[colData] : i+1);
-      referenciasPlanilha = json.map(r => colRef && r[colRef] ? String(r[colRef]).trim() : 'Não informada');
+      referenciasPlanilha = json.map(r => {
+        if (!colRef || !r[colRef]) return 'Não informada';
+        const cidade = String(r[colRef]).trim();
+        const uf = colUf && r[colUf] ? String(r[colUf]).trim() : '';
+        return uf ? `${cidade} - ${uf}` : cidade;
+      });
 
       if (colLat && colLng) {
         coordenadas = json.map(r => {
-          if(r[colLat] === undefined || r[colLng] === undefined) return null;
+          if(r[colLat] === undefined || r[colLat] === '' || r[colLng] === undefined || r[colLng] === '') return null;
           let lat = parseFloat(String(r[colLat]).replace(',', '.'));
           let lng = parseFloat(String(r[colLng]).replace(',', '.'));
           return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] : null;
