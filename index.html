@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V10.5)</title>
+<title>Sistema de Auditoria de Velocidade (V10.6)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -170,6 +170,18 @@ button:hover {
   min-height: 400px;
 }
 
+.info-rota-mapa {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #f8fafc;
+  border-bottom: 1px solid #cbd5e1;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: #1e293b;
+}
+.info-rota-mapa span b { color: #0f172a; }
+
 .btn-toggle-tabela { background: #475569; }
 .btn-toggle-tabela.ativo { background: #16a34a; }
 .btn-copiar-tabela { background: #10b981; font-size: 12px; padding: 6px 12px; }
@@ -206,7 +218,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades v10.5</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V10.6</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -273,6 +285,11 @@ button:hover {
     <div class="container-mapa">
       <div class="cabecalho-tabela-flex">
         <h3>🗺️Mapa da Rota</h3>
+      </div>
+      <div id="infoRotaMapa" class="info-rota-mapa">
+        <span>📍 <b>Origem:</b> <span id="cidadeOrigem">--</span></span>
+        <span>🏁 <b>Destino:</b> <span id="cidadeDestino">--</span></span>
+        <span>📏 <b>Distância percorrida:</b> <span id="distanciaTotal">--</span></span>
       </div>
       <div id="mapaRota"></div>
     </div>
@@ -511,6 +528,67 @@ function desenharRotaNoMapa() {
 
   // Ajustar zoom do mapa para abranger toda a rota
   map.fitBounds(polylineRota.getBounds(), { padding: [20, 20] });
+
+  // Calcular e exibir distância total percorrida + origem/destino
+  calcularDistanciaEEnderecos(rotaValida);
+}
+
+// Distância entre dois pontos (Haversine) em km
+function distanciaHaversine(p1, p2) {
+  const R = 6371;
+  const toRad = g => g * Math.PI / 180;
+  const dLat = toRad(p2[0] - p1[0]);
+  const dLng = toRad(p2[1] - p1[1]);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(p1[0])) * Math.cos(toRad(p2[0])) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Soma a distância ponto a ponto seguindo a rota registrada (não é linha reta origem-destino)
+function calcularDistanciaTotalRota(rota) {
+  let total = 0;
+  for (let i = 1; i < rota.length; i++) {
+    total += distanciaHaversine(rota[i - 1], rota[i]);
+  }
+  return total;
+}
+
+// Geocodificação reversa (lat/lng -> cidade/UF) via Nominatim/OpenStreetMap
+async function obterCidadePorCoordenada(lat, lng) {
+  try {
+    const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`, {
+      headers: { 'Accept-Language': 'pt-BR' }
+    });
+    const data = await resp.json();
+    const addr = data.address || {};
+    const cidade = addr.city || addr.town || addr.village || addr.municipality || addr.county || null;
+    const uf = addr['ISO3166-2-lvl4'] ? addr['ISO3166-2-lvl4'].split('-')[1] : (addr.state || '');
+    if (!cidade) return 'Local não identificado';
+    return uf ? `${cidade} - ${uf}` : cidade;
+  } catch (err) {
+    console.error('Erro ao buscar cidade:', err);
+    return 'Não identificado';
+  }
+}
+
+async function calcularDistanciaEEnderecos(rotaValida) {
+  const distanciaKm = calcularDistanciaTotalRota(rotaValida);
+  document.getElementById('distanciaTotal').innerText = distanciaKm.toFixed(1) + ' km';
+
+  document.getElementById('cidadeOrigem').innerText = 'Buscando...';
+  document.getElementById('cidadeDestino').innerText = 'Buscando...';
+
+  const origem = rotaValida[0];
+  const destino = rotaValida[rotaValida.length - 1];
+
+  const [nomeOrigem, nomeDestino] = await Promise.all([
+    obterCidadePorCoordenada(origem[0], origem[1]),
+    obterCidadePorCoordenada(destino[0], destino[1])
+  ]);
+
+  document.getElementById('cidadeOrigem').innerText = nomeOrigem;
+  document.getElementById('cidadeDestino').innerText = nomeDestino;
 }
 
 function calcularMetricas(){
