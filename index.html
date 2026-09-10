@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V10.1)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V10.5)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -75,6 +75,8 @@ button:hover {
   background: #f1f5f9;
 }
 .media { background: #dcfce7; border: 2px solid #22c55e; }
+.dentro-limite { background: #dcfce7; border: 2px solid #22c55e; }
+.acima-limite { background: #fee2e2; border: 2px solid #ef4444; }
 
 .status-log {
   background: #f8fafc;
@@ -204,7 +206,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades</h2>
+    <h2>📊 Filtro automático de excessos de velocidades v10.5</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -229,6 +231,11 @@ button:hover {
     <div class="card">Maior Velocidade<br><strong id="pico">--</strong></div>
     <div class="card">Total de Picos<br><strong id="picos">--</strong></div>
     <div class="card">Pontuação Gerada<br><strong id="pontuacao">--</strong></div>
+  </div>
+
+  <div class="info-container">
+    <div class="card dentro-limite">% Dentro do Permitido<br><strong id="percDentro">--</strong></div>
+    <div class="card acima-limite">% Acima do Permitido<br><strong id="percAcima">--</strong></div>
   </div>
 
   <div id="statusLog" class="status-log">Aguardando importação do arquivo...</div>
@@ -480,7 +487,7 @@ function desenharRotaNoMapa() {
   // Desenhar linha de rota azul
   polylineRota = L.polyline(rotaValida, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(map);
 
-  // Inserir pontos de excesso no mapa 
+  // Inserir pontos de excesso no mapa (Pinos Vermelhos)
   velocidades.forEach((vel, idx) => {
     if (vel > limite && coordenadas[idx]) {
       const marker = L.circleMarker(coordenadas[idx], {
@@ -515,10 +522,20 @@ function calcularMetricas(){
   const totalAcimaDoLimite = velocidades.filter(v => v > limite).length;
   const pontuacao = calcularPontuacao(velocidades, limite);
 
+  // % dentro/acima do permitido, considerando apenas registros com velocidade > 5 km/h (veículo em movimento)
+  const emMovimento = velocidades.filter(v => v > 5);
+  const totalEmMovimento = emMovimento.length;
+  const totalDentroDoLimite = emMovimento.filter(v => v <= limite).length;
+  const totalAcimaEmMovimento = totalEmMovimento - totalDentroDoLimite;
+  const percDentro = totalEmMovimento ? ((totalDentroDoLimite / totalEmMovimento) * 100).toFixed(1) : "0.0";
+  const percAcima = totalEmMovimento ? ((totalAcimaEmMovimento / totalEmMovimento) * 100).toFixed(1) : "0.0";
+
   document.getElementById('media').innerText = media + " km/h";
   document.getElementById('pico').innerText = pico + " km/h";
   document.getElementById('picos').innerText = totalAcimaDoLimite;
   document.getElementById('pontuacao').innerText = pontuacao;
+  document.getElementById('percDentro').innerText = percDentro + "%";
+  document.getElementById('percAcima').innerText = percAcima + "%";
 
   atualizarTabelaPainelDados();
   if(autoDownload) exportarFiltrado();
@@ -528,16 +545,16 @@ function calcularPontuacao(velocidades, limite){
   let pontos = 0;
   velocidades.forEach(v => {
     if (v <= limite) return;
-    if (limite == 88) {
-      if (v >= 89 && v <= 93) pontos += 1;
-      else if (v >= 94 && v <= 96) pontos += 2;
-      else if (v >= 97 && v <= 99) pontos += 3;
-      else if (v >= 100) pontos += 10;
-    }
     if (limite == 80) {
       if (v >= 81 && v <= 88) pontos += 1;
       else if (v >= 89 && v <= 94) pontos += 2;
       else if (v >= 95 && v <= 99) pontos += 3;
+      else if (v >= 100) pontos += 10;
+    } else {
+      // Vale para 88 e para qualquer outro limite (81 em diante)
+      if (v >= 89 && v <= 93) pontos += 1;
+      else if (v >= 94 && v <= 96) pontos += 2;
+      else if (v >= 97 && v <= 99) pontos += 3;
       else if (v >= 100) pontos += 10;
     }
   });
