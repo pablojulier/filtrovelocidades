@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V10.7)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V10.8)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -77,6 +77,19 @@ button:hover {
 .media { background: #dcfce7; border: 2px solid #22c55e; }
 .dentro-limite { background: #dcfce7; border: 2px solid #22c55e; }
 .acima-limite { background: #fee2e2; border: 2px solid #ef4444; }
+.card-rota {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  text-align: left;
+  background: #f8fafc;
+  border: 2px solid #cbd5e1;
+  font-size: 12.5px;
+  color: #1e293b;
+}
+.card-rota span b { color: #0f172a; }
 
 .status-log {
   background: #f8fafc;
@@ -182,8 +195,8 @@ button:hover {
 }
 .info-rota-mapa span b { color: #0f172a; }
 
-.btn-toggle-tabela { background: #475569; }
-.btn-toggle-tabela.ativo { background: #16a34a; }
+.btn-limpar { background: #dc2626; }
+.btn-limpar:hover { background: #b91c1c; }
 .btn-copiar-tabela { background: #10b981; font-size: 12px; padding: 6px 12px; }
 .btn-copiar-imagem { background: #6366f1; font-size: 12px; padding: 6px 12px; margin-left: 5px; }
 
@@ -218,11 +231,11 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V10.7</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V10.8</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
-      <button id="btnToggleTabela" class="btn-toggle-tabela ativo" onclick="alternarVisibilidadeTabela()">Ocultar Tabela</button>
+      <button id="btnLimpar" class="btn-limpar" onclick="limparDados()">🧹 Limpar</button>
       <label style="margin-left:5px; font-size:12px;">
         <input type="checkbox" id="autoDownload"> Baixar planilha
       </label>
@@ -248,6 +261,11 @@ button:hover {
   <div class="info-container">
     <div class="card dentro-limite">% Dentro do Permitido<br><strong id="percDentro">--</strong></div>
     <div class="card acima-limite">% Acima do Permitido<br><strong id="percAcima">--</strong></div>
+    <div class="card card-rota">
+      <span>📍 <b>Origem:</b> <span id="cidadeOrigem2">--</span></span>
+      <span>🏁 <b>Destino:</b> <span id="cidadeDestino2">--</span></span>
+      <span>📏 <b>Distância percorrida:</b> <span id="distanciaTotal2">--</span></span>
+    </div>
   </div>
 
   <div id="statusLog" class="status-log">Aguardando importação do arquivo...</div>
@@ -307,7 +325,6 @@ let limite = 88;
 let dadosOriginais = [];
 let colunaVelocidadeGlobal = "";
 let autoDownload = localStorage.getItem("autoDownload") !== "false";
-let exibirTabelaPainel = true;
 
 // Variáveis do Mapa
 let map = null;
@@ -324,9 +341,11 @@ document.getElementById('autoDownload').addEventListener('change', function() {
 function inicializarMapa() {
   if (map) return;
   map = L.map('mapaRota').setView([-14.2350, -51.9253], 4); // Visão geral do Brasil
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap'
+  
+  // Utiliza o servidor OpenStreetMap France (100% gratuito e sem necessidade de API Key)
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    maxZoom: 20,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 }
 
@@ -635,10 +654,20 @@ async function obterCidadePorCoordenada(lat, lng) {
 
 async function calcularDistanciaEEnderecos(rotaValida) {
   const distanciaKm = calcularDistanciaTotalRota(rotaValida);
-  document.getElementById('distanciaTotal').innerText = distanciaKm.toFixed(1) + ' km';
+  const distanciaTexto = distanciaKm.toFixed(1) + ' km';
+  ['distanciaTotal', 'distanciaTotal2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = distanciaTexto;
+  });
 
-  document.getElementById('cidadeOrigem').innerText = 'Buscando...';
-  document.getElementById('cidadeDestino').innerText = 'Buscando...';
+  ['cidadeOrigem', 'cidadeOrigem2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = 'Buscando...';
+  });
+  ['cidadeDestino', 'cidadeDestino2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = 'Buscando...';
+  });
 
   const origem = rotaValida[0];
   const destino = rotaValida[rotaValida.length - 1];
@@ -648,8 +677,14 @@ async function calcularDistanciaEEnderecos(rotaValida) {
     obterCidadePorCoordenada(destino[0], destino[1])
   ]);
 
-  document.getElementById('cidadeOrigem').innerText = nomeOrigem;
-  document.getElementById('cidadeDestino').innerText = nomeDestino;
+  ['cidadeOrigem', 'cidadeOrigem2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = nomeOrigem;
+  });
+  ['cidadeDestino', 'cidadeDestino2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = nomeDestino;
+  });
 }
 
 function calcularMetricas(){
@@ -719,21 +754,47 @@ function exportarFiltrado(){
   XLSX.writeFile(wb, `excesso_completo_${nome}.xlsx`);
 }
 
-function alternarVisibilidadeTabela() {
-  const container = document.getElementById('containerTabelaExcessos'); 
-  const btn = document.getElementById('btnToggleTabela');
-  exibirTabelaPainel = !exibirTabelaPainel;
-  if (exibirTabelaPainel) { 
-    container.style.display = 'block'; 
-    btn.classList.add('ativo'); 
-    btn.innerText = 'Ocultar Tabela'; 
-    atualizarTabelaPainelDados(); 
-  } else { 
-    container.style.display = 'none'; 
-    btn.classList.remove('ativo'); 
-    btn.innerText = 'Exibir Tabela'; 
+function limparDados() {
+  if (!confirm('Tem certeza que deseja limpar todos os dados carregados?')) return;
+
+  // Reseta todos os dados carregados da planilha
+  velocidades = [];
+  labels = [];
+  coordenadas = [];
+  referenciasPlanilha = [];
+  dadosOriginais = [];
+  colunaVelocidadeGlobal = "";
+
+  // Reseta os cartões de métricas
+  document.getElementById('media').innerText = '--';
+  document.getElementById('pico').innerText = '--';
+  document.getElementById('picos').innerText = '--';
+  document.getElementById('pontuacao').innerText = '--';
+  document.getElementById('percDentro').innerText = '--';
+  document.getElementById('percAcima').innerText = '--';
+
+  // Reseta os painéis de rota (mapa e ao lado do % Acima do Permitido)
+  ['cidadeOrigem', 'cidadeOrigem2', 'cidadeDestino', 'cidadeDestino2', 'distanciaTotal', 'distanciaTotal2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = '--';
+  });
+
+  // Limpa a rota e os marcadores do mapa
+  if (map) {
+    if (polylineRota) { map.removeLayer(polylineRota); polylineRota = null; }
+    marcadoresExcessos.forEach(m => map.removeLayer(m));
+    marcadoresExcessos = [];
   }
-  if (map) setTimeout(() => map.invalidateSize(), 200);
+
+  // Limpa a tabela de registros de excesso
+  atualizarTabelaPainelDados();
+
+  // Reseta a área de upload/telemetria
+  dropTelemetria.classList.remove('loaded');
+  document.getElementById('txtTelemetria').innerText = 'Arraste a planilha de velocidade aqui';
+  document.getElementById('fileTelemetria').value = '';
+
+  log("Dados limpos. Aguardando importação do arquivo...");
 }
 
 function atualizarTabelaPainelDados() {
