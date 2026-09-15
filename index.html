@@ -231,7 +231,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V10.8</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V10.9</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -370,6 +370,7 @@ function exibirMensagemCopiadoCurta(textoCustomizado) {
 function copiarTabelaComoImagem() {
     const container = document.getElementById('containerTabelaExcessos');
     const tabela = document.getElementById('tabelaDadosExcessos');
+    const wrapper = tabela.closest('.wrapper-tabela');
     
     if (!dadosOriginais.length) return alert("Nenhum dado para converter em imagem.");
 
@@ -380,29 +381,51 @@ function copiarTabelaComoImagem() {
         container.style.left = '-9999px';
     }
 
-    html2canvas(tabela, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        logging: false
-    }).then(canvas => {
-        canvas.toBlob(blob => {
-            if (!blob) return;
-            navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
-                exibirMensagemCopiadoCurta("📸 Tabela copiada como imagem!");
-            });
-        });
-        
-        if (estavaEscondido) {
-            container.style.display = 'none';
-            container.style.position = 'static';
-        }
-    }).catch(err => {
-        console.error("Erro ao gerar imagem:", err);
-        if (estavaEscondido) {
-            container.style.display = 'none';
-            container.style.position = 'static';
-        }
+    // O html2canvas não lida bem com "position: sticky": se a tabela estiver rolada no
+    // momento da captura, o cabeçalho é desenhado na posição do scroll (meio da imagem)
+    // em vez de no topo. Por isso, resetamos o scroll e desativamos o sticky temporariamente.
+    const scrollAnterior = wrapper ? wrapper.scrollTop : 0;
+    const thsCabecalho = tabela.querySelectorAll('thead th');
+    const posicaoOriginalThs = [];
+    thsCabecalho.forEach(th => {
+        posicaoOriginalThs.push(th.style.position);
+        th.style.position = 'static';
     });
+    if (wrapper) wrapper.scrollTop = 0;
+
+    const restaurarEstadoOriginal = () => {
+        thsCabecalho.forEach((th, i) => { th.style.position = posicaoOriginalThs[i]; });
+        if (wrapper) wrapper.scrollTop = scrollAnterior;
+    };
+
+    // Pequeno atraso para o navegador aplicar o reset de scroll/posição antes de capturar a imagem
+    setTimeout(() => {
+        html2canvas(tabela, {
+            backgroundColor: '#ffffff',
+            scale: 2,
+            logging: false
+        }).then(canvas => {
+            canvas.toBlob(blob => {
+                if (!blob) return;
+                navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
+                    exibirMensagemCopiadoCurta("📸 Tabela copiada como imagem!");
+                });
+            });
+
+            restaurarEstadoOriginal();
+            if (estavaEscondido) {
+                container.style.display = 'none';
+                container.style.position = 'static';
+            }
+        }).catch(err => {
+            console.error("Erro ao gerar imagem:", err);
+            restaurarEstadoOriginal();
+            if (estavaEscondido) {
+                container.style.display = 'none';
+                container.style.position = 'static';
+            }
+        });
+    }, 50);
 }
 
 const dropTelemetria = document.getElementById('dropTelemetria');
