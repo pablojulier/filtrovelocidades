@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V10.8)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V11)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -158,6 +158,34 @@ button:hover {
 .tabela-excessos tr:nth-child(even) {
   background: #f8fafc;
 }
+.badge-erro {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.linha-possivel-erro {
+  background: #fef2f2 !important;
+}
+.btn-excluir-linha {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-excluir-linha:hover { background: #b91c1c; }
+/* Usado apenas durante a geração da imagem da tabela, para não exportar a coluna de Ação */
+.tabela-excessos.ocultar-acao-imagem .col-acao { display: none; }
 
 /* Ajuste de Largura das Colunas */
 .tabela-excessos th:nth-child(1), .tabela-excessos td:nth-child(1) { width: 85px; }
@@ -165,6 +193,7 @@ button:hover {
 .tabela-excessos th:nth-child(3), .tabela-excessos td:nth-child(3) { width: 110px; }
 .tabela-excessos th:nth-child(4), .tabela-excessos td:nth-child(4) { width: auto; white-space: normal; word-break: break-word; }
 .tabela-excessos th:nth-child(5), .tabela-excessos td:nth-child(5) { width: 75px; text-align: center; }
+.tabela-excessos th:nth-child(6), .tabela-excessos td:nth-child(6) { width: 90px; text-align: center; }
 
 /* Container do Mapa */
 .container-mapa {
@@ -231,7 +260,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V10.9</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V11</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -288,11 +317,12 @@ button:hover {
               <th>Data / Hora</th>
               <th>Referência</th>
               <th>Velocidade</th>
+              <th class="col-acao">Ação</th>
             </tr>
           </thead>
           <tbody id="corpoTabelaExcessos">
             <tr>
-              <td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado ou limite não violado.</td>
+              <td colspan="6" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado ou limite não violado.</td>
             </tr>
           </tbody>
         </table>
@@ -393,9 +423,14 @@ function copiarTabelaComoImagem() {
     });
     if (wrapper) wrapper.scrollTop = 0;
 
+    // A coluna de Ação (botão Excluir) não faz sentido numa imagem estática, então é ocultada
+    // apenas durante a captura.
+    tabela.classList.add('ocultar-acao-imagem');
+
     const restaurarEstadoOriginal = () => {
         thsCabecalho.forEach((th, i) => { th.style.position = posicaoOriginalThs[i]; });
         if (wrapper) wrapper.scrollTop = scrollAnterior;
+        tabela.classList.remove('ocultar-acao-imagem');
     };
 
     // Pequeno atraso para o navegador aplicar o reset de scroll/posição antes de capturar a imagem
@@ -711,7 +746,7 @@ async function calcularDistanciaEEnderecos(rotaValida) {
 }
 
 function calcularMetricas(){
-  if(!velocidades.length) return;
+  if(!velocidades.length) { atualizarTabelaPainelDados(); return; }
   const mov = velocidades.filter(v=>v>0);
   const media = mov.length ? (mov.reduce((a,b)=>a+b,0)/mov.length).toFixed(1) : 0;
   const pico = Math.max(...velocidades);
@@ -824,7 +859,7 @@ function atualizarTabelaPainelDados() {
   const corpo = document.getElementById('corpoTabelaExcessos');
   if(!corpo) return;
   if (!dadosOriginais.length) {
-    corpo.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado na aplicação.</td></tr>`;
+    corpo.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 15px;">Nenhum dado carregado na aplicação.</td></tr>`;
     return;
   }
   let linesHTML = "";
@@ -834,21 +869,40 @@ function atualizarTabelaPainelDados() {
       totalAdicionados++;
       const latVal = coordenadas[index] ? coordenadas[index][0].toFixed(6) : 'N/A';
       const lngVal = coordenadas[index] ? coordenadas[index][1].toFixed(6) : 'N/A';
+      const possivelErro = vel > 135;
       linesHTML += `
-        <tr>
+        <tr${possivelErro ? ' class="linha-possivel-erro"' : ''}>
           <td>${latVal}</td>
           <td>${lngVal}</td>
           <td>${labels[index] || 'N/A'}</td>
           <td style="color:#334155; font-weight:500;">${referenciasPlanilha[index]}</td>
-          <td style="font-weight:bold; color: ${vel >= 100 ? '#dc2626' : '#b45309'}">${vel} km/h</td>
+          <td style="font-weight:bold; color: ${vel >= 100 ? '#dc2626' : '#b45309'}">${vel} km/h${possivelErro ? ' <span class="badge-erro">⚠️ Possível Erro</span>' : ''}</td>
+          <td class="col-acao"><button class="btn-excluir-linha" onclick="excluirRegistro(${index})" title="Excluir este registro da planilha">🗑️ Excluir</button></td>
         </tr>`;
     }
   });
   if (totalAdicionados === 0) {
-    corpo.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #64748b; padding: 15px;">Nenhum registro acima do limite.</td></tr>`;
+    corpo.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 15px;">Nenhum registro acima do limite.</td></tr>`;
   } else {
     corpo.innerHTML = linesHTML;
   }
+}
+
+// Remove um registro (linha) de todas as bases de dados (velocidade, coordenadas, data/hora,
+// referência e dados originais da planilha) e refaz os cálculos de pontuação, médias, % e mapa.
+function excluirRegistro(index) {
+  if (!confirm('Deseja realmente excluir este registro? Ele será removido da planilha e a pontuação será recalculada. Esta ação não pode ser desfeita.')) return;
+
+  velocidades.splice(index, 1);
+  labels.splice(index, 1);
+  coordenadas.splice(index, 1);
+  referenciasPlanilha.splice(index, 1);
+  dadosOriginais.splice(index, 1);
+
+  calcularMetricas();   // Recalcula média, pico, pontuação, % dentro/acima e já atualiza a tabela
+  desenharRotaNoMapa(); // Redesenha a rota e os marcadores do mapa sem o ponto excluído
+
+  log('Registro excluído. Pontuação, métricas e mapa foram recalculados.');
 }
 
 function copiarTabelaParaEmail() {
@@ -881,20 +935,22 @@ function copiarTabelaParaEmail() {
       <tbody>`;
 
   registrosParaCopiar.forEach(r => {
+    const alerta = r.vel > 135 ? ' <span style="color:#dc2626; font-weight:700;">(Possível Erro)</span>' : '';
     htmlEmail += `
         <tr>
           <td>${r.lat}</td>
           <td>${r.lng}</td>
           <td>${r.data}</td>
           <td>${r.ref}</td>
-          <td style="font-weight: bold; color: ${r.vel >= 100 ? '#dc2626' : '#b45309'};">${r.vel} km/h</td>
+          <td style="font-weight: bold; color: ${r.vel >= 100 ? '#dc2626' : '#b45309'};">${r.vel} km/h${alerta}</td>
         </tr>`;
   });
   htmlEmail += `</tbody></table>`;
 
   let textoPlano = "Latitude\tLongitude\tData / Hora\tReferência\tVelocidade\n";
   registrosParaCopiar.forEach(r => {
-    textoPlano += `${r.lat}\t${r.lng}\t${r.data}\t${r.ref}\t${r.vel} km/h\n`;
+    const alerta = r.vel > 135 ? ' (Possível Erro)' : '';
+    textoPlano += `${r.lat}\t${r.lng}\t${r.data}\t${r.ref}\t${r.vel} km/h${alerta}\n`;
   });
 
   const blobHTML = new Blob([htmlEmail], { type: 'text/html' });
