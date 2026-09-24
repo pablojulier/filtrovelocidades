@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V11)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V12)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -25,6 +25,13 @@ body {
   border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.1);
   position: relative;
+}
+.rodape-versao {
+  max-width: 1350px;
+  margin: 10px auto 0;
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
 }
 .top-bar {
   display: flex;
@@ -228,6 +235,7 @@ button:hover {
 .btn-limpar:hover { background: #b91c1c; }
 .btn-copiar-tabela { background: #10b981; font-size: 12px; padding: 6px 12px; }
 .btn-copiar-imagem { background: #6366f1; font-size: 12px; padding: 6px 12px; margin-left: 5px; }
+.btn-copiar-imagem-resumida { background: #0891b2; font-size: 12px; padding: 6px 12px; margin-left: 5px; }
 
 .notificacao-copiado {
   position: fixed;
@@ -260,7 +268,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V11</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V12</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -306,6 +314,7 @@ button:hover {
         <div>
           <button id="btnCopiarTabelaEmail" class="btn-copiar-tabela" onclick="copiarTabelaParaEmail()">📋 E-mail / Excel</button>
           <button class="btn-copiar-tabela btn-copiar-imagem" onclick="copiarTabelaComoImagem()">📸 Imagem</button>
+          <button class="btn-copiar-tabela btn-copiar-imagem-resumida" onclick="copiarTabelaComoImagemResumida()">🖼️ Imagem Resumida</button>
         </div>
       </div>
       <div class="wrapper-tabela">
@@ -344,6 +353,8 @@ button:hover {
   </div>
 
 </div>
+
+<div class="rodape-versao">Atualizado em 24/09/2026</div>
 
 <script>
 let velocidades = [];
@@ -461,6 +472,94 @@ function copiarTabelaComoImagem() {
             }
         });
     }, 50);
+}
+
+// Gera e copia para a área de transferência uma versão RESUMIDA da tabela: apenas as 40
+// linhas com as MAIORES velocidades entre os registros acima do limite. A tabela visível
+// na tela não é alterada — a montagem acontece em uma tabela temporária fora da tela.
+function copiarTabelaComoImagemResumida() {
+    if (!dadosOriginais.length) return alert("Nenhum dado para converter em imagem.");
+
+    // Reconstrói a mesma lista de registros que aparece na tabela visível (velocidade > limite),
+    // preservando o índice original para depois reordenar cronologicamente.
+    const registros = [];
+    velocidades.forEach((vel, index) => {
+        if (vel > limite) {
+            registros.push({
+                idx: index,
+                lat: coordenadas[index] ? coordenadas[index][0].toFixed(6) : 'N/A',
+                lng: coordenadas[index] ? coordenadas[index][1].toFixed(6) : 'N/A',
+                data: labels[index] || 'N/A',
+                ref: referenciasPlanilha[index],
+                vel: vel
+            });
+        }
+    });
+
+    if (!registros.length) return alert("Nenhum registro acima do limite para gerar a imagem resumida.");
+
+    // Seleciona as 40 MAIORES velocidades, mas devolve a ordenação para a ordem cronológica original
+    // (ordem em que os registros aparecem na planilha/tabela), em vez de ordenar por velocidade.
+    const top40 = [...registros]
+        .sort((a, b) => b.vel - a.vel)
+        .slice(0, 40)
+        .sort((a, b) => a.idx - b.idx);
+
+    // Monta uma tabela temporária com o mesmo estilo (classe "tabela-excessos"), mantendo o
+    // cabeçalho, mas fora da tela — não interfere na tabela visível ao usuário.
+    let linhasHTML = '';
+    top40.forEach(r => {
+        const possivelErro = r.vel > 135;
+        linhasHTML += `
+          <tr${possivelErro ? ' class="linha-possivel-erro"' : ''}>
+            <td>${r.lat}</td>
+            <td>${r.lng}</td>
+            <td>${r.data}</td>
+            <td style="color:#334155; font-weight:500;">${r.ref}</td>
+            <td style="font-weight:bold; color: ${r.vel >= 100 ? '#dc2626' : '#b45309'}">${r.vel} km/h${possivelErro ? ' <span class="badge-erro">⚠️ Possível Erro</span>' : ''}</td>
+          </tr>`;
+    });
+
+    const tabelaTemp = document.createElement('table');
+    tabelaTemp.className = 'tabela-excessos';
+    tabelaTemp.style.tableLayout = 'fixed';
+    tabelaTemp.style.width = '700px';
+    tabelaTemp.innerHTML = `
+        <thead>
+          <tr>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Data / Hora</th>
+            <th>Referência</th>
+            <th>Velocidade</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHTML}</tbody>`;
+
+    const containerTemp = document.createElement('div');
+    containerTemp.style.position = 'absolute';
+    containerTemp.style.left = '-9999px';
+    containerTemp.style.top = '0';
+    containerTemp.style.background = '#ffffff';
+    containerTemp.appendChild(tabelaTemp);
+    document.body.appendChild(containerTemp);
+
+    html2canvas(tabelaTemp, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false
+    }).then(canvas => {
+        canvas.toBlob(blob => {
+            if (!blob) { document.body.removeChild(containerTemp); return; }
+            navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
+                exibirMensagemCopiadoCurta(`🖼️ Imagem resumida copiada (${top40.length} maiores velocidades)!`);
+            });
+            document.body.removeChild(containerTemp);
+        });
+    }).catch(err => {
+        console.error("Erro ao gerar imagem resumida:", err);
+        document.body.removeChild(containerTemp);
+    });
 }
 
 const dropTelemetria = document.getElementById('dropTelemetria');
