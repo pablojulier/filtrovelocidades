@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V12)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V12.1)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -354,7 +354,7 @@ button:hover {
 
 </div>
 
-<div class="rodape-versao">Atualizado em 24/09/2026</div>
+<div class="rodape-versao">Atualizado em 01/10/2026</div>
 
 <script>
 let velocidades = [];
@@ -444,25 +444,30 @@ function copiarTabelaComoImagem() {
         tabela.classList.remove('ocultar-acao-imagem');
     };
 
-    // Pequeno atraso para o navegador aplicar o reset de scroll/posição antes de capturar a imagem
-    setTimeout(() => {
+    // Aguarda dois frames de renderização (mais confiável que um tempo fixo) para garantir
+    // que o navegador já aplicou o reset de scroll/posição antes de capturar a imagem.
+    // Isso evita falhas intermitentes de captura em tabelas pequenas, onde o reflow do
+    // layout pode não estar concluído a tempo de um setTimeout curto.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
         html2canvas(tabela, {
             backgroundColor: '#ffffff',
             scale: 2,
-            logging: false
+            logging: false,
+            imageTimeout: 15000
         }).then(canvas => {
-            canvas.toBlob(blob => {
-                if (!blob) return;
-                navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
-                    exibirMensagemCopiadoCurta("📸 Tabela copiada como imagem!");
-                });
-            });
-
             restaurarEstadoOriginal();
             if (estavaEscondido) {
                 container.style.display = 'none';
                 container.style.position = 'static';
             }
+
+            canvas.toBlob(blob => {
+                if (!blob) {
+                    alert("Não foi possível gerar a imagem da tabela. Tente novamente.");
+                    return;
+                }
+                copiarBlobOuBaixar(blob, "tabela_excessos.png", "📸 Tabela copiada como imagem!");
+            });
         }).catch(err => {
             console.error("Erro ao gerar imagem:", err);
             restaurarEstadoOriginal();
@@ -470,8 +475,31 @@ function copiarTabelaComoImagem() {
                 container.style.display = 'none';
                 container.style.position = 'static';
             }
+            alert("Erro ao gerar a imagem da tabela. Tente novamente.");
         });
-    }, 50);
+    }));
+}
+
+// Copia um blob de imagem para a área de transferência. Caso o navegador recuse a cópia
+// (ex: documento sem foco, comum logo após fechar uma caixa de confirmação como a do
+// botão "Excluir"), baixa a imagem automaticamente como arquivo PNG, garantindo que o
+// usuário sempre receba o resultado, mesmo quando a cópia silenciosa falha.
+function copiarBlobOuBaixar(blob, nomeArquivo, mensagemSucesso) {
+    window.focus();
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
+        exibirMensagemCopiadoCurta(mensagemSucesso);
+    }).catch(err => {
+        console.error("Erro ao copiar para a área de transferência:", err);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = nomeArquivo;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert("Não foi possível copiar automaticamente (o navegador pode ter bloqueado por perda de foco). A imagem foi baixada como arquivo em vez disso.");
+    });
 }
 
 // Gera e copia para a área de transferência uma versão RESUMIDA da tabela: apenas as 40
@@ -536,6 +564,13 @@ function copiarTabelaComoImagemResumida() {
         </thead>
         <tbody>${linhasHTML}</tbody>`;
 
+    // A classe "tabela-excessos" define o cabeçalho como "position: sticky". Mesmo numa tabela
+    // temporária sem scroll próprio, o "ancestral de rolagem" mais próximo acaba sendo a própria
+    // página — então, se a página estiver rolada no momento da captura, o html2canvas pode
+    // desenhar o cabeçalho fora do topo da imagem. Por segurança, desativamos o sticky também aqui.
+    const thsCabecalhoTemp = tabelaTemp.querySelectorAll('thead th');
+    thsCabecalhoTemp.forEach(th => { th.style.position = 'static'; });
+
     const containerTemp = document.createElement('div');
     containerTemp.style.position = 'absolute';
     containerTemp.style.left = '-9999px';
@@ -544,22 +579,29 @@ function copiarTabelaComoImagemResumida() {
     containerTemp.appendChild(tabelaTemp);
     document.body.appendChild(containerTemp);
 
-    html2canvas(tabelaTemp, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        logging: false
-    }).then(canvas => {
-        canvas.toBlob(blob => {
-            if (!blob) { document.body.removeChild(containerTemp); return; }
-            navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(() => {
-                exibirMensagemCopiadoCurta(`🖼️ Imagem resumida copiada (${top40.length} maiores velocidades)!`);
-            });
+    // Aguarda dois frames de renderização para garantir que a tabela temporária já foi
+    // inserida e estilizada pelo navegador antes da captura (mais confiável que um timeout fixo).
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        html2canvas(tabelaTemp, {
+            backgroundColor: '#ffffff',
+            scale: 2,
+            logging: false,
+            imageTimeout: 15000
+        }).then(canvas => {
             document.body.removeChild(containerTemp);
+            canvas.toBlob(blob => {
+                if (!blob) {
+                    alert("Não foi possível gerar a imagem resumida. Tente novamente.");
+                    return;
+                }
+                copiarBlobOuBaixar(blob, "tabela_excessos_resumida.png", `🖼️ Imagem resumida copiada (${top40.length} maiores velocidades)!`);
+            });
+        }).catch(err => {
+            console.error("Erro ao gerar imagem resumida:", err);
+            document.body.removeChild(containerTemp);
+            alert("Erro ao gerar a imagem resumida. Tente novamente.");
         });
-    }).catch(err => {
-        console.error("Erro ao gerar imagem resumida:", err);
-        document.body.removeChild(containerTemp);
-    });
+    }));
 }
 
 const dropTelemetria = document.getElementById('dropTelemetria');
