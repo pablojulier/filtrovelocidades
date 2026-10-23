@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V12.1)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V12.3)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -84,6 +84,8 @@ button:hover {
 .media { background: #dcfce7; border: 2px solid #22c55e; }
 .dentro-limite { background: #dcfce7; border: 2px solid #22c55e; }
 .acima-limite { background: #fee2e2; border: 2px solid #ef4444; }
+.pontuacao-excedida { color: #dc2626 !important; font-weight: 700; }
+.pontuacao-excedida::before { content: "⚠️ "; }
 .card-rota {
   flex: 2;
   display: flex;
@@ -268,7 +270,7 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V12</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V12.3</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
@@ -302,6 +304,7 @@ button:hover {
       <span>📍 <b>Origem:</b> <span id="cidadeOrigem2">--</span></span>
       <span>🏁 <b>Destino:</b> <span id="cidadeDestino2">--</span></span>
       <span>📏 <b>Distância percorrida:</b> <span id="distanciaTotal2">--</span></span>
+      <span>🎯 <b>Pontuação total:</b> <span id="pontuacaoTotal2">--</span></span>
     </div>
   </div>
 
@@ -347,6 +350,7 @@ button:hover {
         <span>📍 <b>Origem:</b> <span id="cidadeOrigem">--</span></span>
         <span>🏁 <b>Destino:</b> <span id="cidadeDestino">--</span></span>
         <span>📏 <b>Distância percorrida:</b> <span id="distanciaTotal">--</span></span>
+        <span>🎯 <b>Pontuação total:</b> <span id="pontuacaoTotal">--</span></span>
       </div>
       <div id="mapaRota"></div>
     </div>
@@ -354,7 +358,7 @@ button:hover {
 
 </div>
 
-<div class="rodape-versao">Atualizado em 01/10/2026</div>
+<div class="rodape-versao">Atualizado em 23/10/2026</div>
 
 <script>
 let velocidades = [];
@@ -851,9 +855,42 @@ async function obterCidadePorCoordenada(lat, lng) {
   }
 }
 
+// Retorna a primeira e a última data/hora identificadas na planilha (ignora linhas sem data, cujo label é apenas o nº da linha)
+function obterPrimeiraEUltimaDataHora() {
+  const formatar = (v) => {
+    if (v instanceof Date && !isNaN(v)) {
+      const p = n => String(n).padStart(2, '0');
+      return `${p(v.getDate())}/${p(v.getMonth() + 1)}/${v.getFullYear()} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`;
+    }
+    return String(v).trim();
+  };
+  const validos = labels.filter(l => l !== undefined && l !== null && l !== '' && typeof l !== 'number');
+  if (!validos.length) return { primeira: '', ultima: '' };
+  return { primeira: formatar(validos[0]), ultima: formatar(validos[validos.length - 1]) };
+}
+
+// Pontuação total permitida pela distância: 1 ponto a cada 100 km (arredondando para cima), mínimo 5 e máximo 25
+function calcularPontuacaoTotalPorDistancia(distanciaKm) {
+  return Math.min(25, Math.max(5, Math.ceil(distanciaKm / 100)));
+}
+
+// Exibe a pontuação total e destaca em vermelho (⚠️) quando a Pontuação Gerada for maior
+function atualizarPontuacaoTotal(distanciaKm) {
+  const pontuacaoTotal = calcularPontuacaoTotalPorDistancia(distanciaKm);
+  const pontuacaoGerada = calcularPontuacao(velocidades, limite);
+  const excedeu = pontuacaoGerada > pontuacaoTotal;
+  ['pontuacaoTotal', 'pontuacaoTotal2', 'pontuacao'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id !== 'pontuacao') el.innerText = pontuacaoTotal;
+    el.classList.toggle('pontuacao-excedida', excedeu);
+  });
+}
+
 async function calcularDistanciaEEnderecos(rotaValida) {
   const distanciaKm = calcularDistanciaTotalRota(rotaValida);
   const distanciaTexto = distanciaKm.toFixed(1) + ' km';
+  atualizarPontuacaoTotal(distanciaKm);
   ['distanciaTotal', 'distanciaTotal2'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerText = distanciaTexto;
@@ -876,13 +913,15 @@ async function calcularDistanciaEEnderecos(rotaValida) {
     obterCidadePorCoordenada(destino[0], destino[1])
   ]);
 
+  const { primeira: dataIni, ultima: dataFim } = obterPrimeiraEUltimaDataHora();
+
   ['cidadeOrigem', 'cidadeOrigem2'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.innerText = nomeOrigem;
+    if (el) el.innerText = dataIni ? `${nomeOrigem}  🕒 ${dataIni}` : nomeOrigem;
   });
   ['cidadeDestino', 'cidadeDestino2'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.innerText = nomeDestino;
+    if (el) el.innerText = dataFim ? `${nomeDestino}  🕒 ${dataFim}` : nomeDestino;
   });
 }
 
@@ -973,10 +1012,12 @@ function limparDados() {
   document.getElementById('percAcima').innerText = '--';
 
   // Reseta os painéis de rota (mapa e ao lado do % Acima do Permitido)
-  ['cidadeOrigem', 'cidadeOrigem2', 'cidadeDestino', 'cidadeDestino2', 'distanciaTotal', 'distanciaTotal2'].forEach(id => {
+  ['cidadeOrigem', 'cidadeOrigem2', 'cidadeDestino', 'cidadeDestino2', 'distanciaTotal', 'distanciaTotal2', 'pontuacaoTotal', 'pontuacaoTotal2'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.innerText = '--';
+    if (el) { el.innerText = '--'; el.classList.remove('pontuacao-excedida'); }
   });
+  const elPontGerada = document.getElementById('pontuacao');
+  if (elPontGerada) elPontGerada.classList.remove('pontuacao-excedida');
 
   // Limpa a rota e os marcadores do mapa
   if (map) {
