@@ -2,9 +2,10 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema de Velocidade + Auditoria Telemetria (V12.3)</title>
+<title>Sistema de Velocidade + Auditoria Telemetria (V12.5)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
 <!-- Leaflet CSS & JS (Mapa interativo gratuito) -->
@@ -260,6 +261,18 @@ button:hover {
   pointer-events: none;
 }
 .notificacao-copiado.visivel { opacity: 1; }
+/* ===== Base de placas ===== */
+.badge-placa { display:none; margin:8px 0; padding:8px 12px; border-radius:8px; background:#eff6ff; border:1px solid #93c5fd; font-size:13px; }
+.badge-placa a { color:#2563eb; font-weight:600; }
+.modal-placas { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10000; align-items:center; justify-content:center; }
+.modal-box { background:#fff; width:min(560px,94vw); max-height:90vh; overflow:auto; border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.3); font-size:13px; }
+.modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:16px; }
+.modal-sec { border-top:1px solid #e2e8f0; padding-top:10px; margin-top:10px; }
+.modal-sec input, .modal-sec select, .modal-sec textarea { padding:5px 7px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; }
+.modal-sec textarea { width:100%; box-sizing:border-box; height:60px; }
+.tab-placas { width:100%; border-collapse:collapse; }
+.tab-placas th, .tab-placas td { padding:4px 6px; border-bottom:1px solid #e2e8f0; text-align:left; }
+.lista-placas { max-height:220px; overflow:auto; }
 </style>
 </head>
 
@@ -270,10 +283,11 @@ button:hover {
 <div class="container" id="elementoPainelCompleto">
 
   <div class="top-bar">
-    <h2>📊 Filtro automático de excessos de velocidades V12.3</h2>
+    <h2>📊 Filtro automático de excessos de velocidades V12.5</h2>
     <div style="display: flex; gap: 6px; align-items: center;">
       Limite: <input type="number" id="limite" value="88" style="width:50px"> km/h
       <button onclick="atualizarLimite()">Atualizar</button>
+      <button onclick="abrirModalPlacas()">🚛 Placas</button>
       <button id="btnLimpar" class="btn-limpar" onclick="limparDados()">🧹 Limpar</button>
       <label style="margin-left:5px; font-size:12px;">
         <input type="checkbox" id="autoDownload"> Baixar planilha
@@ -285,6 +299,44 @@ button:hover {
     <div id="dropTelemetria" class="drop-zone">
       <b>1. Telemetria do Veículo</b><br>
       <span id="txtTelemetria">Arraste a planilha de velocidade aqui</span>
+    </div>
+  </div>
+
+  <div id="badgePlaca" class="badge-placa"></div>
+
+  <div id="modalPlacas" class="modal-placas" style="display:none" onclick="if(event.target===this)fecharModalPlacas()">
+    <div class="modal-box">
+      <div class="modal-head"><b>🚛 Base de placas</b><button onclick="fecharModalPlacas()">✖</button></div>
+
+      <div id="boxConta"></div>
+
+      <div class="modal-sec">
+        <b>Cadastrar placa</b><br>
+        <input type="text" id="inpPlaca" placeholder="abc1234" maxlength="8" style="width:100px;text-transform:uppercase">
+        <select id="selLimitePlaca"><option value="80">80 km/h</option><option value="88">88 km/h</option><option value="90">90 km/h</option></select>
+        <button onclick="cadastrarPlacaManual()">Salvar</button>
+      </div>
+
+      <div class="modal-sec">
+        <b>Placas cadastradas</b> <span id="qtdPlacas" style="color:#64748b"></span>
+        <div class="lista-placas"><table class="tab-placas"><thead><tr><th>Placa</th><th>Limite</th><th></th></tr></thead><tbody id="corpoPlacas"></tbody></table></div>
+      </div>
+
+      <div class="modal-sec">
+        <b>Importar em lote</b> <span style="color:#64748b">(uma por linha: <code>GAP8C43 90</code>)</span>
+        <textarea id="txtLote" placeholder="abc1112 90&#10;abc1234 88"></textarea>
+        <button onclick="importarLote()">Importar</button>
+        <button onclick="exportarBasePlacas()">Exportar JSON</button>
+      </div>
+
+      <details class="modal-sec">
+        <summary><b>☁️ Configurar Supabase</b></summary>
+        <div style="margin-top:6px">
+          <input type="text" id="inpSbUrl" placeholder="https://xxxx.supabase.co" style="width:100%;box-sizing:border-box;margin-bottom:4px"><br>
+          <input type="text" id="inpSbKey" placeholder="anon public key" style="width:100%;box-sizing:border-box;margin-bottom:4px"><br>
+          <button onclick="salvarConfigSupabase()">Salvar e recarregar</button>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -625,6 +677,202 @@ function setupDropZone(zone, callback) {
   });
 }
 
+
+// ===================== BASE DE PLACAS =====================
+const SUPABASE_URL_PADRAO = '';   // opcional: preencha aqui ou pelo botão 🚛 Placas > Configurar Supabase
+const SUPABASE_KEY_PADRAO = '';   // anon public key
+const LIMITES_VALIDOS = [80, 88, 90];
+
+let basePlacas = {};
+try { basePlacas = JSON.parse(localStorage.getItem('basePlacas') || '{}'); } catch (e) { basePlacas = {}; }
+let sb = null;
+let sbUser = null;
+
+function salvarBaseLocal() { localStorage.setItem('basePlacas', JSON.stringify(basePlacas)); }
+function normalizarPlaca(p) { return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+// Extrai a placa do nome do arquivo, ex: "GAP8C43 - 2026-10-29.xlsx" ou "MLF-6258 - 2026-10-29.xlsx"
+function extrairPlaca(nomeArquivo) {
+  const m = String(nomeArquivo || '').toUpperCase().match(/(?<![A-Z0-9])([A-Z]{3})-?([0-9][A-Z0-9][0-9]{2})(?![A-Z0-9])/);
+  return m ? m[1] + m[2] : null;
+}
+
+function aplicarLimitePorPlaca(nomeArquivo) {
+  const badge = document.getElementById('badgePlaca');
+  const placa = extrairPlaca(nomeArquivo);
+  if (!placa) { badge.style.display = 'none'; return; }
+  badge.style.display = 'block';
+  if (basePlacas[placa]) {
+    limite = Number(basePlacas[placa]);
+    document.getElementById('limite').value = limite;
+    badge.innerHTML = `🔎 Placa <b>${placa}</b> encontrada na base → limite <b>${limite} km/h</b> aplicado.`;
+    log(`Placa ${placa}: limite ${limite} km/h aplicado pela base.`);
+  } else {
+    badge.innerHTML = `🔎 Placa <b>${placa}</b> não cadastrada — usando ${limite} km/h. <a href="#" onclick="cadastrarPlacaDoArquivo('${placa}');return false;">Cadastrar com ${limite} km/h</a>`;
+  }
+}
+
+async function cadastrarPlacaDoArquivo(placa) {
+  if (!LIMITES_VALIDOS.includes(Number(limite))) return alert('Ajuste o limite para 80, 88 ou 90 antes de cadastrar a placa.');
+  await salvarPlaca(placa, Number(limite));
+  document.getElementById('badgePlaca').innerHTML = `✔️ Placa <b>${placa}</b> cadastrada com <b>${limite} km/h</b>.`;
+}
+
+async function salvarPlaca(placa, lim) {
+  placa = normalizarPlaca(placa);
+  if (!/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(placa)) return alert('Placa inválida. Exemplos: abc1112 ou abc1234.');
+  if (!LIMITES_VALIDOS.includes(lim)) return alert('Limite deve ser 80, 88 ou 90.');
+  basePlacas[placa] = lim;
+  salvarBaseLocal();
+  renderizarPlacas();
+  if (sb && sbUser) {
+    const { error } = await sb.from('placas').upsert({ user_id: sbUser.id, placa, limite: lim }, { onConflict: 'user_id,placa' });
+    if (error) { console.error(error); alert('Salvo só neste navegador. Erro ao salvar na nuvem: ' + error.message); }
+  }
+}
+
+async function removerPlaca(placa) {
+  if (!confirm(`Remover a placa ${placa} da base?`)) return;
+  delete basePlacas[placa];
+  salvarBaseLocal();
+  renderizarPlacas();
+  if (sb && sbUser) {
+    const { error } = await sb.from('placas').delete().eq('placa', placa);
+    if (error) { console.error(error); alert('Erro ao remover na nuvem: ' + error.message); }
+  }
+}
+
+function cadastrarPlacaManual() {
+  const inp = document.getElementById('inpPlaca');
+  salvarPlaca(inp.value, Number(document.getElementById('selLimitePlaca').value)).then(() => { inp.value = ''; });
+}
+
+async function importarLote() {
+  const linhas = document.getElementById('txtLote').value.split(/\r?\n/);
+  let ok = 0, ruins = [];
+  const itens = [];
+  linhas.forEach(l => {
+    if (!l.trim()) return;
+    const partes = l.trim().split(/[\s;,\t]+/);
+    const placa = normalizarPlaca(partes[0]);
+    const lim = Number(partes[1]);
+    if (/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(placa) && LIMITES_VALIDOS.includes(lim)) { basePlacas[placa] = lim; itens.push({ user_id: sbUser ? sbUser.id : null, placa, limite: lim }); ok++; }
+    else ruins.push(l.trim());
+  });
+  salvarBaseLocal();
+  renderizarPlacas();
+  if (sb && sbUser && itens.length) {
+    const { error } = await sb.from('placas').upsert(itens, { onConflict: 'user_id,placa' });
+    if (error) alert('Importadas localmente. Erro na nuvem: ' + error.message);
+  }
+  document.getElementById('txtLote').value = ruins.join('\n');
+  alert(`${ok} placa(s) importada(s).` + (ruins.length ? `\n${ruins.length} linha(s) inválida(s) ficaram na caixa.` : ''));
+}
+
+function exportarBasePlacas() {
+  const blob = new Blob([JSON.stringify(basePlacas, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'base_placas.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function renderizarPlacas() {
+  const corpo = document.getElementById('corpoPlacas');
+  if (!corpo) return;
+  const placas = Object.keys(basePlacas).sort();
+  document.getElementById('qtdPlacas').innerText = `(${placas.length})`;
+  corpo.innerHTML = placas.length
+    ? placas.map(p => `<tr><td>${p}</td><td>${Number(basePlacas[p])} km/h</td><td><button onclick="removerPlaca('${p}')">🗑️</button></td></tr>`).join('')
+    : '<tr><td colspan="3" style="color:#64748b">Nenhuma placa cadastrada.</td></tr>';
+}
+
+// ---------- Supabase (opcional) ----------
+// Aceita a URL colada com barra final, /rest/v1/, /auth/v1/ etc. e mantém só https://xxxx.supabase.co
+function limparUrlSupabase(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try { return new URL(u).origin; } catch (e) { return u; }
+}
+
+function configSupabase() {
+  return { url: limparUrlSupabase(localStorage.getItem('sbUrl') || SUPABASE_URL_PADRAO), key: (localStorage.getItem('sbKey') || SUPABASE_KEY_PADRAO).trim() };
+}
+
+function salvarConfigSupabase() {
+  localStorage.setItem('sbUrl', limparUrlSupabase(document.getElementById('inpSbUrl').value));
+  localStorage.setItem('sbKey', document.getElementById('inpSbKey').value.trim());
+  location.reload();
+}
+
+function iniciarSupabase() {
+  const { url, key } = configSupabase();
+  if (!url || !key || !window.supabase) { atualizarBoxConta(); return; }
+  sb = window.supabase.createClient(url, key);
+  sb.auth.onAuthStateChange((evento, sessao) => {
+    sbUser = sessao ? sessao.user : null;
+    atualizarBoxConta();
+    if (sbUser && (evento === 'SIGNED_IN' || evento === 'INITIAL_SESSION')) setTimeout(sincronizarNuvem, 0);
+  });
+}
+
+async function sincronizarNuvem() {
+  if (!sb || !sbUser) return;
+  const { data, error } = await sb.from('placas').select('placa,limite');
+  if (error) { console.error(error); log('Erro ao ler a base na nuvem: ' + error.message); return; }
+  const nuvem = {};
+  data.forEach(r => { nuvem[r.placa] = r.limite; });
+  // placas que só existem neste navegador sobem para a nuvem
+  const novos = Object.keys(basePlacas).filter(p => !(p in nuvem));
+  if (novos.length) {
+    const { error: e2 } = await sb.from('placas').upsert(novos.map(p => ({ user_id: sbUser.id, placa: p, limite: basePlacas[p] })), { onConflict: 'user_id,placa' });
+    if (!e2) novos.forEach(p => { nuvem[p] = basePlacas[p]; });
+  }
+  basePlacas = Object.assign({}, basePlacas, nuvem);
+  salvarBaseLocal();
+  renderizarPlacas();
+  log(`Base de placas sincronizada (${Object.keys(basePlacas).length} placas).`);
+}
+
+async function entrarConta() {
+  const { error } = await sb.auth.signInWithPassword({ email: document.getElementById('inpEmail').value.trim(), password: document.getElementById('inpSenha').value });
+  if (error) alert('Erro ao entrar: ' + error.message);
+}
+async function criarConta() {
+  const { data, error } = await sb.auth.signUp({ email: document.getElementById('inpEmail').value.trim(), password: document.getElementById('inpSenha').value });
+  if (error) return alert('Erro ao criar conta: ' + error.message);
+  if (!data.session) alert('Conta criada. Confirme o e-mail recebido e depois clique em Entrar.');
+}
+async function sairConta() { await sb.auth.signOut(); }
+
+function atualizarBoxConta() {
+  const box = document.getElementById('boxConta');
+  if (!box) return;
+  if (!sb) {
+    box.innerHTML = '☁️ <b>Nuvem não configurada.</b> A base fica salva só neste navegador. Para guardar na nuvem, use "Configurar Supabase" abaixo.';
+  } else if (!sbUser) {
+    box.innerHTML = '☁️ <b>Login opcional</b> — entre para guardar a base na nuvem.<br><input type="email" id="inpEmail" placeholder="e-mail" style="padding:5px;margin:4px 4px 0 0"><input type="password" id="inpSenha" placeholder="senha" style="padding:5px;margin:4px 4px 0 0"><button onclick="entrarConta()">Entrar</button> <button onclick="criarConta()">Criar conta</button>';
+  } else {
+    box.innerHTML = '☁️ Logado como <b id="lblEmail"></b> <button onclick="sairConta()">Sair</button>';
+    document.getElementById('lblEmail').textContent = sbUser.email || '';
+  }
+}
+
+function abrirModalPlacas() {
+  const c = configSupabase();
+  document.getElementById('inpSbUrl').value = c.url;
+  document.getElementById('inpSbKey').value = c.key;
+  atualizarBoxConta();
+  renderizarPlacas();
+  document.getElementById('modalPlacas').style.display = 'flex';
+}
+function fecharModalPlacas() { document.getElementById('modalPlacas').style.display = 'none'; }
+
+iniciarSupabase();
+// ===================== FIM BASE DE PLACAS =====================
+
 function processarTelemetria(file) {
   log("Processando planilha de telemetria...");
   const reader = new FileReader();
@@ -758,6 +1006,7 @@ function processarTelemetria(file) {
         coordenadas = [];
       }
 
+      aplicarLimitePorPlaca(file.name);
       calcularMetricas();
       desenharRotaNoMapa();
       dropTelemetria.classList.add('loaded');
@@ -953,22 +1202,22 @@ function calcularMetricas(){
   if(autoDownload) exportarFiltrado();
 }
 
+// Faixas de pontuação por limite: [de, até, pontos]
+const FAIXAS_PONTUACAO = {
+  80: [[81, 88, 1], [89, 94, 2], [95, 99, 3]],
+  88: [[89, 92, 1], [93, 96, 2], [97, 99, 3]],
+  90: [[91, 93, 1], [94, 96, 2], [97, 99, 3]]
+};
+
 function calcularPontuacao(velocidades, limite){
   let pontos = 0;
+  // Limites 80, 88 e 90 têm regra própria; qualquer outro limite usa a regra do 88
+  const faixas = FAIXAS_PONTUACAO[limite] || FAIXAS_PONTUACAO[88];
   velocidades.forEach(v => {
     if (v <= limite) return;
-    if (limite == 80) {
-      if (v >= 81 && v <= 88) pontos += 1;
-      else if (v >= 89 && v <= 94) pontos += 2;
-      else if (v >= 95 && v <= 99) pontos += 3;
-      else if (v >= 100) pontos += 10;
-    } else {
-      // Vale para 88 e para qualquer outro limite (81 em diante)
-      if (v >= 89 && v <= 93) pontos += 1;
-      else if (v >= 94 && v <= 96) pontos += 2;
-      else if (v >= 97 && v <= 99) pontos += 3;
-      else if (v >= 100) pontos += 10;
-    }
+    if (v >= 100) { pontos += 10; return; }
+    const faixa = faixas.find(f => v >= f[0] && v <= f[1]);
+    if (faixa) pontos += faixa[2];
   });
   return pontos;
 }
@@ -995,6 +1244,7 @@ function exportarFiltrado(){
 function limparDados() {
   if (!confirm('Tem certeza que deseja limpar todos os dados carregados?')) return;
 
+  document.getElementById("badgePlaca").style.display = "none";
   // Reseta todos os dados carregados da planilha
   velocidades = [];
   labels = [];
